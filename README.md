@@ -53,6 +53,7 @@ The agent calls the following tools internally — you don't need to use them di
 | `cron_list` | List all scheduled tasks |
 | `cron_run` | Run a task immediately |
 | `cron_delete` | Delete a task |
+| `cron_once` | Schedule a one-shot delay task |
 
 ### Task file format
 
@@ -125,6 +126,7 @@ Agent 内部会调用以下工具来完成，你不需要直接使用：
 | `cron_list` | 列出所有任务 |
 | `cron_run` | 立即执行一个任务 |
 | `cron_delete` | 删除任务 |
+| `cron_once` | 定时一次性延迟任务 |
 
 ### 任务文件格式
 

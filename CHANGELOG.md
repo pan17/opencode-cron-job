@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.5] - 2026-06-05
+
+### Fixed
+- cron 任务 ID 在 reload 后漂移导致删除失败（按 name 保留旧 ID）
+- 删除 cron 任务后仍有僵尸触发（cancelled 标志位防护）
+- cron_delete 正则删除脆弱，改用统一的 removeJobFromFile
+- cron 注入时干扰用户正在输入的内容（改用 session.promptAsync 直接发送消息）
+- cron_once 触发后未从内存 jobs 数组移除，cron_list 仍显示过期任务
+- cron_create/cron_delete/cron_once 不必要地 stop/restart 所有已有任务（改为仅操作自身）
+
 ## [0.1.4] - 2026-06-05
 
 ### Removed

@@ -1,15 +1,19 @@
-import { readFileSync, existsSync } from "fs"
+import { readFileSync, existsSync, appendFileSync, mkdirSync, writeFileSync } from "fs"
 import { join } from "path"
 import cron from "node-cron"
 import { tool, type Plugin } from "@opencode-ai/plugin"
 
-interface Job {
-  id: string
+interface Task {
   name: string
   schedule: string
   prompt: string
+}
+
+interface Job extends Task {
+  id: string
   task: cron.ScheduledTask | null
   timer: ReturnType<typeof setTimeout> | null
+  cancelled: boolean
 }
 
 function parseDelay(s: string): number {
@@ -24,8 +28,8 @@ function parseDelay(s: string): number {
   return n * 60000
 }
 
-function parseTasks(content: string): { name: string; schedule: string; prompt: string }[] {
-  const tasks: { name: string; schedule: string; prompt: string }[] = []
+function parseTasks(content: string): Task[] {
+  const result: Task[] = []
   const sections = content.split(/^## /m).filter((s) => s.trim())
   for (const section of sections) {
     const lines = section.split("\n")
@@ -35,124 +39,186 @@ function parseTasks(content: string): { name: string; schedule: string; prompt: 
     for (const line of lines.slice(1)) {
       const t = line.trim()
       if (t.startsWith("- cron:")) schedule = t.slice("- cron:".length).trim()
+      else if (t.startsWith("- delay:")) schedule = t.slice("- delay:".length).trim()
       else if (t.startsWith("- prompt:")) prompt = t.slice("- prompt:".length).trim()
     }
-    if (schedule && prompt) tasks.push({ name, schedule, prompt })
+    if (schedule && prompt) result.push({ name, schedule, prompt })
   }
-  return tasks
+  return result
 }
 
 let jobs: Job[] = []
 let nextId = 1
 
-const _CronPlugin: Plugin = async ({ client, directory }) => {
-  const tasksFile = join(directory, ".cron-job", "tasks.md")
+export const CronPlugin: Plugin = async ({ client, directory }) => {
+    const tasksFile = join(directory, ".cron-job", "tasks.md")
 
-  function fire(job: Job) {
-    client.tui.appendPrompt({ body: { text: job.prompt } })
-      .then(() => client.tui.submitPrompt())
-      .catch(() => {})
-  }
-
-  function schedule(j: Job) {
-    if (cron.validate(j.schedule)) {
-      j.task = cron.schedule(j.schedule, () => fire(j))
+    async function fire(job: Job) {
+      try {
+        const res = await client.session.list({ query: { directory } })
+        const sessions = res.data
+        if (!sessions || sessions.length === 0) return
+        sessions.sort((a, b) => b.time.updated - a.time.updated)
+        await client.session.promptAsync({
+          path: { id: sessions[0].id },
+          body: {
+            parts: [{ type: "text", text: job.prompt }],
+          },
+        })
+      } catch (e: any) {
+        process.stderr.write(`[cron] fire error: ${e.message}\n`)
+      }
     }
-  }
 
-  // Load from file on startup
-  if (existsSync(tasksFile)) {
-    const items = parseTasks(readFileSync(tasksFile, "utf-8"))
-    for (const item of items) {
-      const job: Job = { ...item, id: String(nextId++), task: null, timer: null }
-      schedule(job)
-      jobs.push(job)
+    function scheduleCron(job: Job) {
+      job.task = cron.schedule(job.schedule, () => {
+        if (job.cancelled) return
+        fire(job)
+      })
     }
-  }
 
-  return {
-    tool: {
-      cron_create: tool({
-        description: "Create a new cron job. The job fires on schedule by injecting the prompt into the user's session. Jobs are ephemeral (in-memory) and lost when OpenCode restarts. To persist a job permanently, also add it to .cron-job/tasks.md so it auto-loads on startup.",
-        args: {
-          name: tool.schema.string().describe("Unique name for this job"),
-          schedule: tool.schema.string().describe("Cron expression. 5-field format (min hour dom mon dow), e.g. '0 9 * * *' for daily at 9am. Supports 6-field with seconds: '*/30 * * * * *' for every 30s."),
-          prompt: tool.schema.string().describe("The prompt text that gets injected into the session when the job fires. The AI will receive this as a user message and act on it."),
-        },
-        async execute(args) {
-          const job: Job = { id: String(nextId++), name: args.name, schedule: args.schedule, prompt: args.prompt, task: null, timer: null }
-          schedule(job)
-          jobs.push(job)
-          return `Created job: ${job.name} (ID: ${job.id}, cron: ${job.schedule})`
-        },
-      }),
+    function scheduleDelay(job: Job) {
+      const ms = parseDelay(job.schedule)
+      if (ms <= 0) return
+      job.timer = setTimeout(() => {
+        if (job.cancelled) return
+        fire(job)
+        removeJobFromFile(job.name)
+        const idx = jobs.indexOf(job)
+        if (idx !== -1) jobs.splice(idx, 1)
+      }, ms)
+    }
 
-      cron_list: tool({
-        description: "List all scheduled cron jobs",
-        args: {},
-        async execute() {
-          if (jobs.length === 0) return "No jobs scheduled."
-          return jobs.map((j) => `${j.id}  ${j.schedule}  ${j.name}`).join("\n")
-        },
-      }),
+    function startJob(item: Task): Job {
+      const job: Job = { ...item, id: String(nextId++), task: null, timer: null, cancelled: false }
+      if (cron.validate(job.schedule)) {
+        scheduleCron(job)
+      } else {
+        scheduleDelay(job)
+      }
+      return job
+    }
 
-      cron_run: tool({
-        description: "Run a job immediately (fire-and-forget). The job fires once right now regardless of its cron schedule. Useful for testing or one-off execution. The job remains scheduled and will continue firing on its normal cron schedule afterwards.",
-        args: {
-          jobId: tool.schema.string().describe("ID of the job to run. Get it from cron_list."),
-        },
-        async execute(args) {
-          const job = jobs.find((j) => j.id === args.jobId)
-          if (!job) return `Job ${args.jobId} not found.`
-          fire(job)
-          return `${job.name}: triggered`
-        },
-      }),
+    function stopJob(job: Job) {
+      job.cancelled = true
+      job.task?.stop()
+      if (job.timer) clearTimeout(job.timer)
+    }
 
-      cron_delete: tool({
-        description: "Delete a cron job. Stops the timer and removes it from memory. This does not modify .cron-job/tasks.md — if the job was defined there, it will reappear after OpenCode restarts.",
-        args: {
-          jobId: tool.schema.string().describe("ID of the job to delete. Get it from cron_list."),
-        },
-        async execute(args) {
-          const idx = jobs.findIndex((j) => j.id === args.jobId)
-          if (idx === -1) return `Job ${args.jobId} not found.`
-          const [job] = jobs.splice(idx, 1)
-          job.task?.stop()
-          if (job.timer) clearTimeout(job.timer)
-          return `${job.name}: deleted`
-        },
-      }),
+    function reloadJobs() {
+      for (const j of jobs) stopJob(j)
+      jobs = []
+      if (!existsSync(tasksFile)) return
+      const items = parseTasks(readFileSync(tasksFile, "utf-8"))
+      for (const item of items) {
+        jobs.push(startJob(item))
+      }
+    }
 
-      cron_once: tool({
-        description: "Schedule a one-shot prompt after a delay. The job fires once and is automatically removed. Useful for reminders like 'remind me in 30 minutes'.",
-        args: {
-          prompt: tool.schema.string().describe("The prompt text to inject when the timer fires. The AI will receive this as a user message."),
-          delay: tool.schema.string().describe("Delay before firing. Examples: '5m' (5 minutes), '30s', '2h', '1d'."),
-          name: tool.schema.string().optional().describe("Optional name for this job (default: auto-generated)"),
-        },
-        async execute(args) {
-          const ms = parseDelay(args.delay)
-          if (ms <= 0) return `Invalid delay: ${args.delay}. Use format like '5m', '30s', '2h'.`
-          const name = args.name || `reminder-${nextId}`
-          const job: Job = {
-            id: String(nextId++), name, schedule: args.delay, prompt: args.prompt,
-            task: null, timer: null,
-          }
-          job.timer = setTimeout(() => {
+    function removeJobFromFile(name: string) {
+      try {
+        const content = readFileSync(tasksFile, "utf-8")
+        const tasks = parseTasks(content)
+        const remaining = tasks.filter((t) => t.name !== name)
+        const lines: string[] = ["# 周期任务"]
+        for (const t of remaining) {
+          lines.push("")
+          lines.push(`## ${t.name}`)
+          lines.push(cron.validate(t.schedule) ? `- cron: ${t.schedule}` : `- delay: ${t.schedule}`)
+          lines.push(`- prompt: ${t.prompt}`)
+        }
+        writeFileSync(tasksFile, lines.join("\n") + "\n")
+      } catch (e: any) {
+        process.stderr.write(`[cron] remove file error: ${e.message}\n`)
+      }
+    }
+
+    // Load from file on startup
+    reloadJobs()
+
+    return {
+      tool: {
+        cron_create: tool({
+          description: "Create a new cron job. Writes to .cron-job/tasks.md and schedules it.",
+          args: {
+            name: tool.schema.string().describe("Unique name for this job"),
+            schedule: tool.schema.string().describe("Cron expression, e.g. '0 9 * * *'"),
+            prompt: tool.schema.string().describe("Prompt to inject when the job fires"),
+          },
+          async execute(args) {
+            const entry = `\n## ${args.name}\n- cron: ${args.schedule}\n- prompt: ${args.prompt}\n\n`
+            if (!existsSync(tasksFile)) {
+              mkdirSync(join(directory, ".cron-job"), { recursive: true })
+              appendFileSync(tasksFile, `# 周期任务\n${entry}`)
+            } else {
+              appendFileSync(tasksFile, entry)
+            }
+            jobs.push(startJob({ name: args.name, schedule: args.schedule, prompt: args.prompt }))
+            return `Created: ${args.name} (${args.schedule})`
+          },
+        }),
+
+        cron_list: tool({
+          description: "List all scheduled cron jobs",
+          args: {},
+          async execute() {
+            if (jobs.length === 0) return "No jobs scheduled."
+            return jobs.map((j) => `${j.id}  ${j.schedule}  ${j.name}`).join("\n")
+          },
+        }),
+
+        cron_run: tool({
+          description: "Run a job immediately",
+          args: {
+            jobId: tool.schema.string().describe("Job ID. Get it from cron_list."),
+          },
+          async execute(args) {
+            const job = jobs.find((j) => j.id === args.jobId)
+            if (!job) return `Job ${args.jobId} not found.`
             fire(job)
-            // Auto-remove after firing
-            const idx = jobs.indexOf(job)
-            if (idx !== -1) jobs.splice(idx, 1)
-          }, ms)
-          jobs.push(job)
-          return `Scheduled: ${name} (fires in ${args.delay})`
-        },
-      }),
-    },
-  }
-}
+            return `${job.name}: triggered`
+          },
+        }),
 
-export default {
-  server: _CronPlugin,
-}
+        cron_delete: tool({
+          description: "Delete a cron job from .cron-job/tasks.md",
+          args: {
+            jobId: tool.schema.string().describe("Job ID. Get it from cron_list."),
+          },
+          async execute(args) {
+            const idx = jobs.findIndex((j) => j.id === args.jobId)
+            if (idx === -1) return `Job ${args.jobId} not found.`
+            const job = jobs[idx]
+            stopJob(job)
+            jobs.splice(idx, 1)
+            removeJobFromFile(job.name)
+            return `${job.name}: deleted`
+          },
+        }),
+
+        cron_once: tool({
+          description: "Schedule a one-shot prompt after a delay. Saved to .cron-job/tasks.md for persistence across restarts.",
+          args: {
+            prompt: tool.schema.string().describe("Prompt to inject when timer fires"),
+            delay: tool.schema.string().describe("Delay: '5m', '30s', '2h', '1d'"),
+            name: tool.schema.string().optional().describe("Optional name"),
+          },
+          async execute(args) {
+            const ms = parseDelay(args.delay)
+            if (ms <= 0) return `Invalid delay: ${args.delay}`
+            const name = args.name || `reminder-${nextId}`
+
+            const entry = `\n## ${name}\n- delay: ${args.delay}\n- prompt: ${args.prompt}\n\n`
+            if (!existsSync(tasksFile)) {
+              mkdirSync(join(directory, ".cron-job"), { recursive: true })
+              appendFileSync(tasksFile, `# 周期任务\n${entry}`)
+            } else {
+              appendFileSync(tasksFile, entry)
+            }
+            jobs.push(startJob({ name, schedule: args.delay, prompt: args.prompt }))
+            return `Scheduled: ${name} (fires in ${args.delay})`
+          },
+        }),
+      },
+    }
+  }

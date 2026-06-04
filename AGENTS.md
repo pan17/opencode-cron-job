@@ -21,14 +21,14 @@ Single-file TypeScript OpenCode plugin (`src/index.ts`). Exports `CronPlugin` wh
 1. Plugin initializes → reads `.cron-job/tasks.md` from `directory` (project root)
 2. Parses `##` sections → extracts `- cron:` and `- prompt:` fields
 3. Schedules each valid cron expression via `node-cron`
-4. On timer fire → `client.tui.appendPrompt()` → `client.tui.submitPrompt()`
-5. Registers 4 tools: `cron_create`, `cron_list`, `cron_run`, `cron_delete`
+4. On timer fire → `client.session.list()` finds active session → `client.session.promptAsync()` injects message (bypasses TUI input)
+5. Registers 5 tools: `cron_create`, `cron_list`, `cron_run`, `cron_delete`, `cron_once`
 
 ### Key constraints
 
 - NOT an MCP server — runs inside OpenCode process (no HTTP API, no sidecar)
 - Tools are defined with `tool()` helper from `@opencode-ai/plugin`, not raw objects
-- Prompt injection uses `client.tui.*` methods (TUI mode only)
+- Prompt injection uses `client.session.promptAsync()` — bypasses TUI input, doesn't interfere with user typing
 - Cron uses 5-field expressions by default, 6-field if seconds are specified (`*/30 * * * * *`)
 - Jobs are in-memory and volatile — reload via `cron_reload` after editing `.cron-job/tasks.md`
 - `@opencode-ai/plugin` is a peer dependency provided by OpenCode runtime
