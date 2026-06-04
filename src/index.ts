@@ -1,5 +1,7 @@
-import { readFileSync, existsSync } from "fs"
+import { readFileSync, existsSync, writeFileSync, rmSync, mkdirSync } from "fs"
 import { join } from "path"
+import { homedir } from "os"
+import { execSync } from "child_process"
 import cron from "node-cron"
 import { tool, type Plugin } from "@opencode-ai/plugin"
 
@@ -10,6 +12,8 @@ interface Job {
   prompt: string
   task: cron.ScheduledTask | null
 }
+
+const CURRENT_VERSION = "0.1.2"
 
 function parseTasks(content: string): { name: string; schedule: string; prompt: string }[] {
   const tasks: { name: string; schedule: string; prompt: string }[] = []
@@ -31,6 +35,37 @@ function parseTasks(content: string): { name: string; schedule: string; prompt: 
 
 let jobs: Job[] = []
 let nextId = 1
+
+async function checkUpdate(client: any) {
+  try {
+    const res = await fetch("https://registry.npmjs.org/opencode-cron-job/latest")
+    const data = await res.json() as { version?: string }
+    if (!data.version || data.version === CURRENT_VERSION) return
+
+    const cacheDir = join(homedir(), ".cache", "opencode", "packages", `opencode-cron-job@latest`)
+    const targetDir = join(cacheDir, "node_modules", "opencode-cron-job")
+    mkdirSync(targetDir, { recursive: true })
+
+    // Download tarball
+    const tgzUrl = `https://registry.npmjs.org/opencode-cron-job/-/opencode-cron-job-${data.version}.tgz`
+    const tgz = await fetch(tgzUrl).then((r) => r.arrayBuffer())
+
+    // Write temp file and extract
+    const tmpFile = join(cacheDir, "..", `_update.tgz`)
+    writeFileSync(tmpFile, Buffer.from(tgz))
+    execSync(`tar -xzf "${tmpFile}" --strip-components=1 -C "${targetDir}"`, { stdio: "ignore" })
+    rmSync(tmpFile, { force: true })
+
+    await client.tui.showToast({
+      body: {
+        message: `opencode-cron-job updated: v${CURRENT_VERSION} → v${data.version}. Restart to apply.`,
+        variant: "success",
+      },
+    })
+  } catch {
+    // Silently ignore
+  }
+}
 
 export const CronPlugin: Plugin = async ({ client, directory }) => {
   const tasksFile = join(directory, ".cron-job", "tasks.md")
@@ -56,6 +91,9 @@ export const CronPlugin: Plugin = async ({ client, directory }) => {
       jobs.push(job)
     }
   }
+
+  // Check for updates in background
+  checkUpdate(client)
 
   return {
     tool: {
