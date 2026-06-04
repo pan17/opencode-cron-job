@@ -1,6 +1,6 @@
 {
   "name": "opencode-cron-job",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "OpenCode plugin - schedule recurring prompts via markdown files",
   "type": "module",
   "main": "./dist/index.js",

@@ -14,7 +14,7 @@ interface Job {
   timer: ReturnType<typeof setTimeout> | null
 }
 
-const CURRENT_VERSION = "0.1.3"
+const CURRENT_VERSION = "0.1.4"
 
 function parseDelay(s: string): number {
   const m = s.match(/^(\d+)\s*(s|sec|second|seconds|m|min|minute|minutes|h|hr|hour|hours|d|day|days)?$/)
