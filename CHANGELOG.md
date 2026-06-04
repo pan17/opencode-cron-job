@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-06-05
+
+### Added
+- `cron_once` 工具：支持一次性延迟任务，格式 `5m`、`30s`、`2h`、`1d`
+
+### Fixed
+- 插件导出格式改为默认导出（v1 plugin format），修复 OpenCode npm 插件加载问题
+
 ## [0.1.2] - 2026-06-04
 
 ### Added

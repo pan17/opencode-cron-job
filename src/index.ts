@@ -11,9 +11,22 @@ interface Job {
   schedule: string
   prompt: string
   task: cron.ScheduledTask | null
+  timer: ReturnType<typeof setTimeout> | null
 }
 
-const CURRENT_VERSION = "0.1.2"
+const CURRENT_VERSION = "0.1.3"
+
+function parseDelay(s: string): number {
+  const m = s.match(/^(\d+)\s*(s|sec|second|seconds|m|min|minute|minutes|h|hr|hour|hours|d|day|days)?$/)
+  if (!m) return 0
+  const n = parseInt(m[1])
+  const unit = (m[2] || "m").charAt(0)
+  if (unit === "s") return n * 1000
+  if (unit === "m") return n * 60000
+  if (unit === "h") return n * 3600000
+  if (unit === "d") return n * 86400000
+  return n * 60000
+}
 
 function parseTasks(content: string): { name: string; schedule: string; prompt: string }[] {
   const tasks: { name: string; schedule: string; prompt: string }[] = []
@@ -67,7 +80,7 @@ async function checkUpdate(client: any) {
   }
 }
 
-export const CronPlugin: Plugin = async ({ client, directory }) => {
+const _CronPlugin: Plugin = async ({ client, directory }) => {
   const tasksFile = join(directory, ".cron-job", "tasks.md")
 
   function fire(job: Job) {
@@ -86,7 +99,7 @@ export const CronPlugin: Plugin = async ({ client, directory }) => {
   if (existsSync(tasksFile)) {
     const items = parseTasks(readFileSync(tasksFile, "utf-8"))
     for (const item of items) {
-      const job: Job = { ...item, id: String(nextId++), task: null }
+      const job: Job = { ...item, id: String(nextId++), task: null, timer: null }
       schedule(job)
       jobs.push(job)
     }
@@ -105,7 +118,7 @@ export const CronPlugin: Plugin = async ({ client, directory }) => {
           prompt: tool.schema.string().describe("The prompt text that gets injected into the session when the job fires. The AI will receive this as a user message and act on it."),
         },
         async execute(args) {
-          const job: Job = { id: String(nextId++), name: args.name, schedule: args.schedule, prompt: args.prompt, task: null }
+          const job: Job = { id: String(nextId++), name: args.name, schedule: args.schedule, prompt: args.prompt, task: null, timer: null }
           schedule(job)
           jobs.push(job)
           return `Created job: ${job.name} (ID: ${job.id}, cron: ${job.schedule})`
@@ -144,9 +157,40 @@ export const CronPlugin: Plugin = async ({ client, directory }) => {
           if (idx === -1) return `Job ${args.jobId} not found.`
           const [job] = jobs.splice(idx, 1)
           job.task?.stop()
+          if (job.timer) clearTimeout(job.timer)
           return `${job.name}: deleted`
+        },
+      }),
+
+      cron_once: tool({
+        description: "Schedule a one-shot prompt after a delay. The job fires once and is automatically removed. Useful for reminders like 'remind me in 30 minutes'.",
+        args: {
+          prompt: tool.schema.string().describe("The prompt text to inject when the timer fires. The AI will receive this as a user message."),
+          delay: tool.schema.string().describe("Delay before firing. Examples: '5m' (5 minutes), '30s', '2h', '1d'."),
+          name: tool.schema.string().optional().describe("Optional name for this job (default: auto-generated)"),
+        },
+        async execute(args) {
+          const ms = parseDelay(args.delay)
+          if (ms <= 0) return `Invalid delay: ${args.delay}. Use format like '5m', '30s', '2h'.`
+          const name = args.name || `reminder-${nextId}`
+          const job: Job = {
+            id: String(nextId++), name, schedule: args.delay, prompt: args.prompt,
+            task: null, timer: null,
+          }
+          job.timer = setTimeout(() => {
+            fire(job)
+            // Auto-remove after firing
+            const idx = jobs.indexOf(job)
+            if (idx !== -1) jobs.splice(idx, 1)
+          }, ms)
+          jobs.push(job)
+          return `Scheduled: ${name} (fires in ${args.delay})`
         },
       }),
     },
   }
+}
+
+export default {
+  server: _CronPlugin,
 }

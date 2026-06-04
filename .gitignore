@@ -3,6 +3,7 @@ dist/
 .opencode/plugins/index.js
 .opencode/node_modules/
 .opencode/
+opencode.json
 .omo/
 *.log
 .env
