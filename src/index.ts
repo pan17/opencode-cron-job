@@ -62,7 +62,7 @@ export const CronPlugin: Plugin = async ({ client, directory }) => {
         await client.session.promptAsync({
           path: { id: sessions[0].id },
           body: {
-            parts: [{ type: "text", text: job.prompt }],
+            parts: [{ type: "text", text: `<cron-reminder>${job.prompt}</cron-reminder>` }],
           },
         })
       } catch (e: any) {
