@@ -73,7 +73,7 @@ Agent 内部会调用以下工具来完成，你不需要直接使用：
 
 ```bash
 # 清除插件缓存后重启 OpenCode
-rm -rf ~/.cache/opencode/node_modules/opencode-cron-job
+rm -rf ~/.cache/opencode/packages/opencode-cron-job
 ```
 
 ## 许可证

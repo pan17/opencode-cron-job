@@ -163,7 +163,7 @@ export const CronPlugin: Plugin = async ({ client, directory }) => {
           args: {},
           async execute() {
             if (jobs.length === 0) return "No jobs scheduled."
-            return jobs.map((j) => `${j.id}  ${j.schedule}  ${j.name}`).join("\n")
+            return jobs.map((j) => `${j.id}  ${j.schedule}  ${j.name}  ${j.prompt}`).join("\n")
           },
         }),
 

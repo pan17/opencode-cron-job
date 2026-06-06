@@ -10,6 +10,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - cron 任务触发时注入的消息用 `<cron-reminder>...</cron-reminder>` 成对标签包裹，agent 可识别为定时提醒而非用户输入
 
+### Changed
+- README 重构：中英文分拆为独立文件，新增 README.zh-CN.md
+- 调整文档结构：Install / Usage 前置，How it works 后移
+- 简化使用说明：用户只需对话，Agent 自动维护任务文件
+- cron_list 输出增加 prompt 列，便于查看任务内容
+- AGENTS.md：移除过时的 cron_reload 提及
+
+### Fixed
+- README 中插件缓存路径修正为 `~/.cache/opencode/packages/`
+
 ## [0.1.5] - 2026-06-05
 
 ### Fixed

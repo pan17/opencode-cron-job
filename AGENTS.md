@@ -30,7 +30,7 @@ Single-file TypeScript OpenCode plugin (`src/index.ts`). Exports `CronPlugin` wh
 - Tools are defined with `tool()` helper from `@opencode-ai/plugin`, not raw objects
 - Prompt injection uses `client.session.promptAsync()` — bypasses TUI input, doesn't interfere with user typing
 - Cron uses 5-field expressions by default, 6-field if seconds are specified (`*/30 * * * * *`)
-- Jobs are in-memory and volatile — reload via `cron_reload` after editing `.cron-job/tasks.md`
+- Jobs are in-memory and volatile — restart OpenCode to reload `.cron-job/tasks.md`
 - `@opencode-ai/plugin` is a peer dependency provided by OpenCode runtime
 - Plugin auto-updates via npm `@latest` tag are unreliable — bump pinned version in config or clear cache manually
 

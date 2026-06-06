@@ -73,7 +73,7 @@ Each section starting with `##` is a task. Supported fields:
 
 ```bash
 # Clear plugin cache and restart OpenCode
-rm -rf ~/.cache/opencode/node_modules/opencode-cron-job
+rm -rf ~/.cache/opencode/packages/opencode-cron-job
 ```
 
 ## License
