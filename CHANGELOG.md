@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.8] - 2026-06-06
+
+### Changed
+- cron_list 输出改为多行格式，完整显示 prompt 内容，修复多行 prompt 被截断的问题
+
 ## [0.1.7] - 2026-06-06
 
 ### Changed
