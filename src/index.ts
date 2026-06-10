@@ -1,4 +1,4 @@
-import { readFileSync, existsSync, appendFileSync, mkdirSync, writeFileSync } from "fs"
+import { readFileSync, existsSync, appendFileSync, mkdirSync, writeFileSync, watchFile } from "fs"
 import { join } from "path"
 import cron from "node-cron"
 import { tool, type Plugin } from "@opencode-ai/plugin"
@@ -48,7 +48,14 @@ function parseTasks(content: string): Task[] {
 }
 
 let jobs: Job[] = []
-let nextId = 1
+let lastWriteTime = 0
+
+function nextJobId(): string {
+  const used = new Set(jobs.map((j) => Number(j.id)))
+  for (let i = 1; ; i++) {
+    if (!used.has(i)) return String(i)
+  }
+}
 
 export const CronPlugin: Plugin = async ({ client, directory }) => {
     const tasksFile = join(directory, ".cron-job", "tasks.md")
@@ -90,7 +97,7 @@ export const CronPlugin: Plugin = async ({ client, directory }) => {
     }
 
     function startJob(item: Task): Job {
-      const job: Job = { ...item, id: String(nextId++), task: null, timer: null, cancelled: false }
+      const job: Job = { ...item, id: nextJobId(), task: null, timer: null, cancelled: false }
       if (cron.validate(job.schedule)) {
         scheduleCron(job)
       } else {
@@ -136,6 +143,15 @@ export const CronPlugin: Plugin = async ({ client, directory }) => {
     // Load from file on startup
     reloadJobs()
 
+    // Watch for external edits (AI modifying .cron-job/tasks.md directly)
+    if (existsSync(tasksFile)) {
+      watchFile(tasksFile, { interval: 5007 }, (curr, prev) => {
+        if (curr.mtimeMs === prev.mtimeMs) return
+        if (Date.now() - lastWriteTime < 200) return
+        reloadJobs()
+      })
+    }
+
     return {
       tool: {
         cron_create: tool({
@@ -147,6 +163,7 @@ export const CronPlugin: Plugin = async ({ client, directory }) => {
           },
           async execute(args) {
             const entry = `\n## ${args.name}\n- cron: ${args.schedule}\n- prompt: ${args.prompt}\n\n`
+            lastWriteTime = Date.now()
             if (!existsSync(tasksFile)) {
               mkdirSync(join(directory, ".cron-job"), { recursive: true })
               appendFileSync(tasksFile, `# 周期任务\n${entry}`)
@@ -194,6 +211,7 @@ export const CronPlugin: Plugin = async ({ client, directory }) => {
             const job = jobs[idx]
             stopJob(job)
             jobs.splice(idx, 1)
+            lastWriteTime = Date.now()
             removeJobFromFile(job.name)
             return `${job.name}: deleted`
           },
@@ -209,9 +227,10 @@ export const CronPlugin: Plugin = async ({ client, directory }) => {
           async execute(args) {
             const ms = parseDelay(args.delay)
             if (ms <= 0) return `Invalid delay: ${args.delay}`
-            const name = args.name || `reminder-${nextId}`
+            const name = args.name || `reminder-${Date.now()}`
 
             const entry = `\n## ${name}\n- delay: ${args.delay}\n- prompt: ${args.prompt}\n\n`
+            lastWriteTime = Date.now()
             if (!existsSync(tasksFile)) {
               mkdirSync(join(directory, ".cron-job"), { recursive: true })
               appendFileSync(tasksFile, `# 周期任务\n${entry}`)

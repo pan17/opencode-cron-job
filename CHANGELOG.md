@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.9] - 2026-06-10
+
+### Fixed
+- AI 直接修改 `.cron-job/tasks.md` 后 cron 不会生效（新增 `fs.watchFile` 监听，带自触发防护）
+- 删除任务后 ID 序号不断累加，不再复用空号（`nextJobId` 回收已删除 ID）
+
+### Added
+- 测试用例覆盖 ID 回收、文件监听、parseDelay/parseTasks 纯函数
+
 ## [0.1.8] - 2026-06-06
 
 ### Changed
